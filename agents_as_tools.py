@@ -1579,7 +1579,6 @@ def build_manager_system_prompt() -> str:
         "- Final answer must end with exactly one line:\n"
         f"{answer_lines}\n"
         "Do not write anything after that last line.\n"
-        "Do NOT output <think>.\n"
     )
 
 
@@ -1607,7 +1606,6 @@ def build_manager_messages(eid: int, q: str, ctx: str, choices: Optional[Dict[st
                 f"Question:\n{q}\n\n"
                 f"{choices_block}"
                 f"Context:\n{ctx}\n\n"
-                "You may call reasoning_tool(example_id=...) and/or context_tool(example_id=...).\n"
                 "If you do NOT call tools, answer directly.\n"
             ),
         },

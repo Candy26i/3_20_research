@@ -1602,11 +1602,21 @@ def build_manager_messages(eid: int, q: str, ctx: str, choices: Optional[Dict[st
         {
             "role": "user",
             "content": (
-                f"Example ID: {eid}\n\n"
+                f"example_id: {eid}\n\n"
                 f"Question:\n{q}\n\n"
                 f"{choices_block}"
                 f"Context:\n{ctx}\n\n"
-                "If you do NOT call tools, answer directly.\n"
+                "You may call reasoning_tool and/or context_tool.\n"
+                "If you call a tool, copy the exact example_id provided above into the arguments.\n"
+                "If you call a tool, do not output any explanation or final answer in the same response.\n"
+                "If you do NOT call tools, answer directly.\n\n"
+                "When calling a tool, output exactly in one or more blocks like these:\n"
+                "<tool_call>\n"
+                f'{{"name": "reasoning_tool", "arguments": {{"example_id": {eid}}}}}\n'
+                "</tool_call>\n\n"
+                "<tool_call>\n"
+                f'{{"name": "context_tool", "arguments": {{"example_id": {eid}}}}}\n'
+                "</tool_call>\n"
             ),
         },
     ]

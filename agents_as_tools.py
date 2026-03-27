@@ -1029,7 +1029,7 @@ def tokenize_sft_dataset(ds: Dataset, tokenizer: Any, max_seq_len: int) -> Datas
 # Train SFT agent (tool models)
 # =========================================================
 def train_sft_agent(
-    base_model: str,
+    tool_base_model: str,
     train_jsonl: str,
     dev_jsonl: str,
     out_dir: str,
@@ -1047,14 +1047,14 @@ def train_sft_agent(
     set_seed(seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    tok = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    tok = AutoTokenizer.from_pretrained(tool_base_model, trust_remote_code=True)
     tok.padding_side = "left"
     if tok.pad_token_id is None and tok.eos_token_id is not None:
         tok.pad_token_id = tok.eos_token_id
 
     dtype = torch.float32 if device == "cpu" else torch.bfloat16
     model = AutoModelForCausalLM.from_pretrained(
-        base_model,
+        tool_base_model,
         torch_dtype=dtype,
         trust_remote_code=True,
     ).to(device)
@@ -1235,20 +1235,21 @@ _IS_MAIN_PROCESS = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0"))
 
 @dataclass
 class FrozenAgent:
-    base_model: str
+    """HF model id or path for loading the tool (plus optional LoRA adapter)."""
+    tool_base_model: str
     adapter_path: Optional[str] = None
     device: str = "cpu"
     max_new_tokens: int = 512
 
     def __post_init__(self):
-        self.tok = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
+        self.tok = AutoTokenizer.from_pretrained(self.tool_base_model, trust_remote_code=True)
         if self.tok.pad_token_id is None and self.tok.eos_token_id is not None:
             self.tok.pad_token_id = self.tok.eos_token_id
         self.tok.padding_side = "left"
 
         dtype = torch.float32 if self.device == "cpu" else torch.bfloat16
         model = AutoModelForCausalLM.from_pretrained(
-            self.base_model,
+            self.tool_base_model,
             torch_dtype=dtype,
             trust_remote_code=True,
         ).to(self.device)
@@ -1297,12 +1298,12 @@ _reasoning_agent: Optional[FrozenAgent] = None
 _context_agent: Optional[FrozenAgent] = None
 
 
-def init_tool_agents(base_model: str, reasoning_adapter: str, context_adapter: str, device: str):
+def init_tool_agents(tool_base_model: str, reasoning_adapter: str, context_adapter: str, device: str):
     global _reasoning_agent, _context_agent
     if _reasoning_agent is None:
-        _reasoning_agent = FrozenAgent(base_model, reasoning_adapter, device=device, max_new_tokens=640)
+        _reasoning_agent = FrozenAgent(tool_base_model, reasoning_adapter, device=device, max_new_tokens=640)
     if _context_agent is None:
-        _context_agent = FrozenAgent(base_model, context_adapter, device=device, max_new_tokens=400)
+        _context_agent = FrozenAgent(tool_base_model, context_adapter, device=device, max_new_tokens=400)
 
 
 def _tool_guard(eid: int) -> Optional[str]:
@@ -1772,7 +1773,7 @@ def teacher_choose_tool_sequence(
 
 
 def build_manager_sft_from_failures(
-    base_model: str,
+    tool_base_model: str,
     reasoning_adapter: str,
     context_adapter: str,
     data_path: str,
@@ -1827,8 +1828,8 @@ def build_manager_sft_from_failures(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Init tool agents (trained adapters)
-    init_tool_agents(base_model, reasoning_adapter, context_adapter, device=device)
+    # Init tool agents (trained adapters; base must match tool SFT / adapter)
+    init_tool_agents(tool_base_model, reasoning_adapter, context_adapter, device=device)
 
     # Ensure globals for tools (NO ground_truth)
     ID2EX.clear()
@@ -1915,7 +1916,7 @@ def build_manager_sft_from_failures(
 # Manager SFT training (on per-turn data)
 # =========================================================
 def train_manager_sft(
-    base_model: str,
+    manager_base_model: str,
     train_jsonl: str,
     out_dir: str,
     seed: int = 42,
@@ -1932,7 +1933,7 @@ def train_manager_sft(
     set_seed(seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    tok = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    tok = AutoTokenizer.from_pretrained(manager_base_model, trust_remote_code=True)
     tok.padding_side = "left"
     if tok.pad_token_id is None and tok.eos_token_id is not None:
         tok.pad_token_id = tok.eos_token_id
@@ -1943,7 +1944,7 @@ def train_manager_sft(
 
     dtype = torch.float32 if device == "cpu" else torch.bfloat16
     model = AutoModelForCausalLM.from_pretrained(
-        base_model,
+        manager_base_model,
         torch_dtype=dtype,
         trust_remote_code=True,
     ).to(device)
@@ -2007,7 +2008,8 @@ def train_manager_sft(
 # Train manager with GRPO (binary reward) on train split
 # =========================================================
 def train_manager_grpo_from_splits(
-    base_model: str,
+    manager_base_model: str,
+    tool_base_model: str,
     data_path: str,
     split_path: str,
     save_dir: str,
@@ -2074,7 +2076,7 @@ def train_manager_grpo_from_splits(
     REASONING_RAW_CACHE.clear()
     CONTEXT_RAW_CACHE.clear()
 
-    init_tool_agents(base_model, reasoning_adapter, context_adapter, device=device)
+    init_tool_agents(tool_base_model, reasoning_adapter, context_adapter, device=device)
 
     # setup fail buffer
     global FAIL_BUFFER_JSONL
@@ -2098,7 +2100,7 @@ def train_manager_grpo_from_splits(
     train_rows = [r for r in rows if r["example_id"] in train_ids]
     dataset = Dataset.from_list(train_rows)
 
-    manager_tok = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    manager_tok = AutoTokenizer.from_pretrained(manager_base_model, trust_remote_code=True)
     manager_tok.padding_side = "left"
     if manager_tok.pad_token_id is None and manager_tok.eos_token_id is not None:
         manager_tok.pad_token_id = manager_tok.eos_token_id
@@ -2136,7 +2138,7 @@ def train_manager_grpo_from_splits(
 
     dtype = torch.float32 if device == "cpu" else torch.bfloat16
     manager_model = AutoModelForCausalLM.from_pretrained(
-        base_model,
+        manager_base_model,
         torch_dtype=dtype,
         trust_remote_code=True,
     ).to(device)
@@ -2182,7 +2184,31 @@ def main():
         ],
     )
 
-    parser.add_argument("--base_model", type=str, default="Qwen/Qwen3-0.6B")
+    parser.add_argument(
+        "--base_model",
+        type=str,
+        default="",
+        help=(
+            "If set: use the same HF id/path for both manager and tool bases "
+            "(overrides --manager_base_model and --tool_base_model). "
+            "Otherwise use the two flags below."
+        ),
+    )
+    parser.add_argument(
+        "--manager_base_model",
+        type=str,
+        default="Qwen/Qwen3-0.6B",
+        help="HF id/path for the manager (GRPO + manager SFT). Chat template must match training.",
+    )
+    parser.add_argument(
+        "--tool_base_model",
+        type=str,
+        default="Qwen/Qwen3-0.6B",
+        help=(
+            "HF id/path for reasoning_tool and context_tool (SFT adapters and GRPO tool rollouts). "
+            "Must match the base used to train --reasoning_tool_out / --context_tool_out."
+        ),
+    )
     parser.add_argument(
         "--data_path",
         type=str,
@@ -2232,7 +2258,7 @@ def main():
     parser.add_argument("--tool_variants_dev", type=int, default=2)
     parser.add_argument("--tool_synth_mode", type=str, default="weak", choices=["weak", "gpt"])
 
-    # tool SFT training
+    # tool SFT training (load weights from --tool_base_model; saves adapters to --reasoning_tool_out / --context_tool_out)
     parser.add_argument("--tool_max_seq_len", type=int, default=4096)
     parser.add_argument("--tool_lr", type=float, default=2e-4)
     parser.add_argument("--tool_epochs", type=int, default=2)
@@ -2273,10 +2299,16 @@ def main():
     parser.add_argument("--manager_sft_use_lora", action="store_true")
 
     args = parser.parse_args()
+    if args.base_model.strip():
+        shared = args.base_model.strip()
+        args.manager_base_model = shared
+        args.tool_base_model = shared
+
     configured_task, configured_labels = configure_task(args.task_name, args.label_space)
     print(f"[TASK] task_name={configured_task} labels={configured_labels}")
     data_path = resolve_data_path_arg(args.data_path, configured_task)
     print(f"[DATA] data_path={data_path}")
+    print(f"[MODELS] manager_base_model={args.manager_base_model} tool_base_model={args.tool_base_model}")
     # Manager prompt depends on task/label configuration
     global MANAGER_SYSTEM
     MANAGER_SYSTEM = build_manager_system_prompt()
@@ -2314,7 +2346,7 @@ def main():
         train_jsonl = os.path.join(args.tool_sft_out_dir, "tool_reasoning_train.jsonl")
         dev_jsonl = os.path.join(args.tool_sft_out_dir, "tool_reasoning_dev.jsonl")
         train_sft_agent(
-            base_model=args.base_model,
+            tool_base_model=args.tool_base_model,
             train_jsonl=train_jsonl,
             dev_jsonl=dev_jsonl,
             out_dir=args.reasoning_tool_out,
@@ -2332,7 +2364,7 @@ def main():
         train_jsonl = os.path.join(args.tool_sft_out_dir, "tool_context_train.jsonl")
         dev_jsonl = os.path.join(args.tool_sft_out_dir, "tool_context_dev.jsonl")
         train_sft_agent(
-            base_model=args.base_model,
+            tool_base_model=args.tool_base_model,
             train_jsonl=train_jsonl,
             dev_jsonl=dev_jsonl,
             out_dir=args.context_tool_out,
@@ -2350,7 +2382,8 @@ def main():
         fb = args.fail_buffer_jsonl.strip() or None
         rt = args.raw_trace_jsonl.strip() or None
         train_manager_grpo_from_splits(
-            base_model=args.base_model,
+            manager_base_model=args.manager_base_model,
+            tool_base_model=args.tool_base_model,
             data_path=data_path,
             split_path=args.split_path,
             save_dir=args.manager_out,
@@ -2378,7 +2411,7 @@ def main():
             fail_path = os.path.join(args.manager_out, "fail_buffer.jsonl")
 
         out_path = build_manager_sft_from_failures(
-            base_model=args.base_model,
+            tool_base_model=args.tool_base_model,
             reasoning_adapter=args.reasoning_tool_out,
             context_adapter=args.context_tool_out,
             data_path=data_path,
@@ -2398,7 +2431,7 @@ def main():
         if not os.path.exists(sft_jsonl):
             raise FileNotFoundError(f"Missing evolve SFT file: {sft_jsonl}")
         train_manager_sft(
-            base_model=args.base_model,
+            manager_base_model=args.manager_base_model,
             train_jsonl=sft_jsonl,
             out_dir=args.manager_sft_out,
             seed=args.seed,
@@ -2416,7 +2449,8 @@ def main():
         rt = args.raw_trace_jsonl.strip() or None
 
         train_manager_grpo_from_splits(
-            base_model=args.base_model,
+            manager_base_model=args.manager_base_model,
+            tool_base_model=args.tool_base_model,
             data_path=data_path,
             split_path=args.split_path,
             save_dir=args.manager_out,
@@ -2438,7 +2472,7 @@ def main():
         )
 
         build_manager_sft_from_failures(
-            base_model=args.base_model,
+            tool_base_model=args.tool_base_model,
             reasoning_adapter=args.reasoning_tool_out,
             context_adapter=args.context_tool_out,
             data_path=data_path,
@@ -2453,7 +2487,7 @@ def main():
 
         sft_jsonl = os.path.join(args.evolve_out_dir, "manager_sft_from_failures.jsonl")
         train_manager_sft(
-            base_model=args.base_model,
+            manager_base_model=args.manager_base_model,
             train_jsonl=sft_jsonl,
             out_dir=args.manager_sft_out,
             seed=args.seed,

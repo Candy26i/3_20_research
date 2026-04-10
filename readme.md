@@ -70,7 +70,7 @@ source .venv/bin/activate
 ## 4. Install Dependencies
 
 Ensure `pyproject.toml` exists, then:
-
+可以不用这一步，直接用下面的一个一个包下载。
 ```bash
 uv sync
 ```

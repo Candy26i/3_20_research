@@ -89,11 +89,11 @@ uv pip install torch torchvision torchaudio --index-url https://download.pytorch
 ---
 
 ## Transformers (>= 5.0.0.dev)
-
+不能用最新版本 直接uv pip install transformers
 ```bash
 uv pip uninstall transformers
-uv pip install git+https://github.com/huggingface/transformers.git@main
-
+#uv pip install git+https://github.com/huggingface/transformers.git@main
+uv pip intsall transformers
 python -c "import transformers; print(transformers.__version__)"
 ```
 

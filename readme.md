@@ -93,7 +93,7 @@ uv pip install torch torchvision torchaudio --index-url https://download.pytorch
 ```bash
 uv pip uninstall transformers
 #uv pip install git+https://github.com/huggingface/transformers.git@main
-uv pip intsall transformers
+uv pip install transformers
 python -c "import transformers; print(transformers.__version__)"
 ```
 
@@ -117,6 +117,9 @@ python -c "import trl; print(trl.__version__)"
 
 ```bash
 uv pip install jmespath
+uv pip install peft
+uv pip install wandb
+wandb login
 ```
 
 ---
